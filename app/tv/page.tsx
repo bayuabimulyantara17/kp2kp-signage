@@ -15,6 +15,7 @@ export default function SamsungTVPlayerPage() {
   const cursorTimeoutRef = useRef<any>(null);
   const currentIndexRef = useRef(currentIndex);
   const playlistRef = useRef(playlist);
+  const isTransitioningRef = useRef(false);
 
   // Sync ref with state
   useEffect(() => {
@@ -80,16 +81,38 @@ export default function SamsungTVPlayerPage() {
     };
   }, [playlist.length, fetchPlaylist]);
 
-  // Next video function
+  // Next video function with debounce lock
   const playNextVideo = useCallback(() => {
+    if (isTransitioningRef.current) return;
     const total = playlistRef.current.length;
     if (total === 0) return;
+
+    isTransitioningRef.current = true;
     const nextIdx = (currentIndexRef.current + 1) % total;
     console.log(`Beralih ke video berikutnya [${nextIdx + 1}/${total}]`);
     setCurrentIndex(nextIdx);
+
+    setTimeout(() => {
+      isTransitioningRef.current = false;
+    }, 1500);
   }, []);
 
-  // When currentIndex or playlist updates, change video src & play
+  // Previous video function
+  const playPrevVideo = useCallback(() => {
+    if (isTransitioningRef.current) return;
+    const total = playlistRef.current.length;
+    if (total === 0) return;
+
+    isTransitioningRef.current = true;
+    const prevIdx = (currentIndexRef.current - 1 + total) % total;
+    setCurrentIndex(prevIdx);
+
+    setTimeout(() => {
+      isTransitioningRef.current = false;
+    }, 1500);
+  }, []);
+
+  // Video source changer
   useEffect(() => {
     if (!hasInteracted || playlist.length === 0) return;
     const videoEl = videoRef.current;
@@ -116,12 +139,40 @@ export default function SamsungTVPlayerPage() {
           .catch((e) => {
             console.error("Playback error:", e);
             setIsLoading(false);
-            // Skip to next video if error
             setTimeout(playNextVideo, 2000);
           });
       });
     }
   }, [currentIndex, playlist, hasInteracted, playNextVideo]);
+
+  // Direct DOM Event Listeners for reliable video completion detection
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
+    const onEnded = () => {
+      console.log("DOM Event 'ended' triggered!");
+      playNextVideo();
+    };
+
+    const onTimeUpdate = () => {
+      // If within 0.4s of end, treat as ended (vital for streaming quirks)
+      if (videoEl.duration > 0 && videoEl.currentTime >= videoEl.duration - 0.4) {
+        if (!isTransitioningRef.current) {
+          console.log("Near-end time reached, triggering next video!");
+          playNextVideo();
+        }
+      }
+    };
+
+    videoEl.addEventListener('ended', onEnded);
+    videoEl.addEventListener('timeupdate', onTimeUpdate);
+
+    return () => {
+      videoEl.removeEventListener('ended', onEnded);
+      videoEl.removeEventListener('timeupdate', onTimeUpdate);
+    };
+  }, [playNextVideo]);
 
   const handleInteract = () => {
     setHasInteracted(true);
@@ -130,14 +181,9 @@ export default function SamsungTVPlayerPage() {
     }
   };
 
-  const handleVideoEnded = () => {
-    console.log("Video selesai diputar, lanjut otomatis...");
-    playNextVideo();
-  };
-
   const handleVideoError = (e: any) => {
     console.error("Video error terdeteksi:", e);
-    setErrorMsg("Video bermasalah, melewati ke video berikutnya...");
+    setErrorMsg("Video bermasalah, melewati ke berikutnya...");
     setTimeout(() => {
       setErrorMsg("");
       playNextVideo();
@@ -146,7 +192,7 @@ export default function SamsungTVPlayerPage() {
 
   const currentVideo = playlist[currentIndex];
 
-  // === OVERLAY: Tap to Play (First-time User Gesture) ===
+  // === OVERLAY: Tap to Play ===
   if (!hasInteracted) {
     return (
       <div
@@ -197,7 +243,6 @@ export default function SamsungTVPlayerPage() {
   return (
     <div
       className={`fixed inset-0 w-screen h-screen bg-black overflow-hidden flex items-center justify-center ${hideCursor ? 'cursor-none' : 'cursor-default'}`}
-      onClick={handleInteract}
     >
       <video
         ref={videoRef}
@@ -205,7 +250,6 @@ export default function SamsungTVPlayerPage() {
         autoPlay
         playsInline
         muted
-        onEnded={handleVideoEnded}
         onError={handleVideoError}
         onWaiting={() => setIsLoading(true)}
         onPlaying={() => setIsLoading(false)}
@@ -220,17 +264,31 @@ export default function SamsungTVPlayerPage() {
 
       {/* Error notification overlay */}
       {errorMsg && (
-        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-black/80 px-6 py-3 rounded-xl border border-red-500/50 pointer-events-none">
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-black/80 px-6 py-3 rounded-xl border border-red-500/50 pointer-events-none">
           <p className="text-white text-sm">{errorMsg}</p>
         </div>
       )}
 
-      {/* Current video index overlay */}
-      {playlist.length > 0 && (
-        <div className="absolute bottom-4 right-4 text-xs text-white/40 font-mono bg-black/40 px-2 py-1 rounded pointer-events-none">
+      {/* Interactive Controls Overlay on Tap */}
+      <div className={`absolute bottom-4 left-4 right-4 flex items-center justify-between transition-opacity duration-300 ${hideCursor ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <button
+          onClick={playPrevVideo}
+          className="bg-black/60 hover:bg-black/80 text-white px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur"
+        >
+          ⏮ Sebelumnya
+        </button>
+
+        <div className="text-xs text-white/80 font-mono bg-black/60 px-3 py-1.5 rounded-lg backdrop-blur">
           {currentIndex + 1} / {playlist.length} {currentVideo ? `• ${currentVideo.name}` : ''}
         </div>
-      )}
+
+        <button
+          onClick={playNextVideo}
+          className="bg-black/60 hover:bg-black/80 text-white px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur"
+        >
+          Berikutnya ⏭
+        </button>
+      </div>
     </div>
   );
 }
