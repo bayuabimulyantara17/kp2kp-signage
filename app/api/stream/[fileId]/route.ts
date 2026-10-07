@@ -37,7 +37,7 @@ function objToBase64Url(obj: object): string {
 // Generate Google OAuth2 access token from service account credentials
 async function getAccessToken(): Promise<string> {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
 
   if (!email || !rawKey) {
     throw new Error('Missing Google service account credentials in environment variables');
