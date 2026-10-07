@@ -8,7 +8,7 @@ import { Tv, Film, ListOrdered, Settings, LogOut, RefreshCw } from 'lucide-react
 export default function Navbar() {
   const pathname = usePathname();
 
-  if (pathname === '/login') return null;
+  if (pathname === '/login' || pathname === '/tv') return null;
 
   const navItems = [
     { name: 'Dashboard', href: '/', icon: Tv },
