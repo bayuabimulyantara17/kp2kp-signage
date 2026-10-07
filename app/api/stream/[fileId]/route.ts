@@ -89,43 +89,15 @@ export async function GET(req: Request, { params }: { params: { fileId: string }
   try {
     const accessToken = await getAccessToken();
 
-    // Forward range header for seek support
-    const rangeHeader = new Headers(req.headers).get('range');
-    const driveHeaders: Record<string, string> = {
-      Authorization: 'Bearer ' + accessToken,
-    };
-    if (rangeHeader) {
-      driveHeaders['Range'] = rangeHeader;
-    }
+    // Redirect browser directly to Google APIs — no proxy, no streaming hang
+    // Browser downloads video straight from Google's CDN
+    const googleUrl =
+      'https://www.googleapis.com/drive/v3/files/' +
+      fileId +
+      '?alt=media&access_token=' +
+      encodeURIComponent(accessToken);
 
-    const driveRes = await fetch(
-      'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media',
-      { headers: driveHeaders }
-    );
-
-    if (!driveRes.ok && driveRes.status !== 206) {
-      return new Response('Failed to fetch from Google Drive: ' + driveRes.status, {
-        status: driveRes.status,
-      });
-    }
-
-    // Build response headers
-    const resHeaders = new Headers();
-    resHeaders.set('Content-Type', driveRes.headers.get('Content-Type') || 'video/mp4');
-    resHeaders.set('Accept-Ranges', 'bytes');
-    resHeaders.set('Cache-Control', 'public, max-age=3600');
-    resHeaders.set('Access-Control-Allow-Origin', '*');
-
-    const contentLength = driveRes.headers.get('Content-Length');
-    if (contentLength) resHeaders.set('Content-Length', contentLength);
-
-    const contentRange = driveRes.headers.get('Content-Range');
-    if (contentRange) resHeaders.set('Content-Range', contentRange);
-
-    return new Response(driveRes.body, {
-      status: driveRes.status,
-      headers: resHeaders,
-    });
+    return Response.redirect(googleUrl, 302);
   } catch (err: any) {
     console.error('Stream error:', err);
     return new Response(JSON.stringify({ error: err.message }), {
