@@ -9,6 +9,9 @@ export async function GET(
   { params }: { params: { deviceId: string } }
 ) {
   const { deviceId } = params;
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'localhost:3000';
+  const proto = req.headers.get('x-forwarded-proto') || 'http';
+  const baseUrl = proto + '://' + host;
 
   try {
     const player = await db.getPlayerByDeviceId(deviceId);
@@ -49,7 +52,7 @@ export async function GET(
       .filter(item => item.video && item.video.status === 'ACTIVE')
       .map(item => {
         const v = item.video!;
-        const driveUrl = 'https://drive.google.com/uc?export=download&id=' + v.google_drive_file_id + '&confirm=t';
+        const driveUrl = baseUrl + '/api/stream/' + v.google_drive_file_id;
         return {
           id: v.id,
           name: v.name,
