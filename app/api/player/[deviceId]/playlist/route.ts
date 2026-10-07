@@ -48,8 +48,16 @@ export async function GET(
     const playlists = await db.getPlaylists();
     const currentPlaylist = playlists.find(p => p.id === playlistId);
 
-    const formattedItems = items
-      .filter(item => item.video && item.video.status === 'ACTIVE')
+      const formattedItems = items
+      .filter(item => {
+        if (!item.video || item.video.status !== 'ACTIVE') return false;
+        // Exclude .mov/.MOV files — not supported by HTML5 browser video player
+        const name = (item.video.name || '').toLowerCase();
+        if (name.endsWith('.mov')) return false;
+        const mime = (item.video.mime_type || '').toLowerCase();
+        if (mime === 'video/quicktime') return false;
+        return true;
+      })
       .map(item => {
         const v = item.video!;
         const driveUrl = baseUrl + '/api/stream/' + v.google_drive_file_id;
