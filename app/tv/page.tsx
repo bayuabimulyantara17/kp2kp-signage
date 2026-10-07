@@ -14,20 +14,7 @@ export default function SamsungTVPlayerPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const cursorTimeoutRef = useRef<any>(null);
-  const currentIndexRef = useRef(currentIndex);
-  const playlistRef = useRef(playlist);
-  const isTransitioningRef = useRef(false);
   const lastTimeRef = useRef<number>(0);
-  const autoNextTimeoutRef = useRef<any>(null);
-
-  // Sync ref with state
-  useEffect(() => {
-    currentIndexRef.current = currentIndex;
-  }, [currentIndex]);
-
-  useEffect(() => {
-    playlistRef.current = playlist;
-  }, [playlist]);
 
   // Auto-hide mouse cursor on TV after 3 seconds
   useEffect(() => {
@@ -64,7 +51,7 @@ export default function SamsungTVPlayerPage() {
 
     // Heartbeat every 30s
     const hbInterval = setInterval(() => {
-      const curVideo = playlistRef.current[currentIndexRef.current]?.name || "Loading";
+      const curVideo = playlist[currentIndex]?.name || "Loading";
       fetch('/api/player/KP2KP-TV-01/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,55 +69,34 @@ export default function SamsungTVPlayerPage() {
       clearInterval(pollInterval);
       clearInterval(hbInterval);
     };
-  }, [playlist.length, fetchPlaylist]);
+  }, [playlist.length, currentIndex, fetchPlaylist]);
 
-  // Next video function (Looping hanya terjadi setelah video TERAKHIR selesai)
-  const playNextVideo = useCallback(() => {
-    if (isTransitioningRef.current) return;
-    const total = playlistRef.current.length;
-    if (total === 0) return;
-
-    isTransitioningRef.current = true;
-    clearTimeout(autoNextTimeoutRef.current);
+  // Next video function (Looping HANYA setelah video terakhir selesai)
+  const advanceToNext = useCallback(() => {
     lastTimeRef.current = 0;
-
-    const currentIdx = currentIndexRef.current;
-    let nextIdx = currentIdx + 1;
-
-    // Jika sudah di video terakhir, baru loop kembali ke video pertama (index 0)
-    if (nextIdx >= total) {
-      console.log(`[Signage Loop] Playlist selesai (${total} video). Mengulang kembali ke video ke-1...`);
-      nextIdx = 0;
-    } else {
-      console.log(`[Auto-Advance] Melanjutkan ke video [${nextIdx + 1}/${total}]`);
-    }
-
-    setCurrentIndex(nextIdx);
-
-    setTimeout(() => {
-      isTransitioningRef.current = false;
-    }, 1000);
-  }, []);
+    setCurrentIndex((prevIdx) => {
+      if (playlist.length === 0) return 0;
+      const next = prevIdx + 1;
+      // Jika sudah melewati video terakhir, baru loop kembali ke video pertama (0)
+      if (next >= playlist.length) {
+        console.log(`[Looping] Selesai ${playlist.length} video. Mengulang dari video ke-1.`);
+        return 0;
+      }
+      console.log(`[Next] Lanjut ke video ${next + 1} / ${playlist.length}`);
+      return next;
+    });
+  }, [playlist.length]);
 
   // Previous video function
-  const playPrevVideo = useCallback(() => {
-    if (isTransitioningRef.current) return;
-    const total = playlistRef.current.length;
-    if (total === 0) return;
-
-    isTransitioningRef.current = true;
-    clearTimeout(autoNextTimeoutRef.current);
+  const advanceToPrev = useCallback(() => {
     lastTimeRef.current = 0;
+    setCurrentIndex((prevIdx) => {
+      if (playlist.length === 0) return 0;
+      return (prevIdx - 1 + playlist.length) % playlist.length;
+    });
+  }, [playlist.length]);
 
-    const prevIdx = (currentIndexRef.current - 1 + total) % total;
-    setCurrentIndex(prevIdx);
-
-    setTimeout(() => {
-      isTransitioningRef.current = false;
-    }, 1000);
-  }, []);
-
-  // Switch video src & handle playback
+  // Ganti video ketika currentIndex berubah
   useEffect(() => {
     if (!hasInteracted || playlist.length === 0) return;
     const videoEl = videoRef.current;
@@ -142,9 +108,7 @@ export default function SamsungTVPlayerPage() {
     setIsLoading(true);
     setErrorMsg("");
     lastTimeRef.current = 0;
-    clearTimeout(autoNextTimeoutRef.current);
 
-    videoEl.removeAttribute('loop');
     videoEl.loop = false;
     videoEl.src = currentItem.download_url;
     videoEl.load();
@@ -154,85 +118,65 @@ export default function SamsungTVPlayerPage() {
       p.then(() => {
         setIsLoading(false);
       }).catch((err) => {
-        console.warn("Autoplay with sound prevented, forcing muted autoplay:", err);
+        console.warn("Autoplay audio blocked, switching to muted:", err);
         videoEl.muted = true;
         videoEl.play()
           .then(() => setIsLoading(false))
           .catch((e) => {
-            console.error("Playback error:", e);
+            console.error("Play error:", e);
             setIsLoading(false);
-            setTimeout(playNextVideo, 2000);
+            // Skip jika video rusak
+            setTimeout(advanceToNext, 2000);
           });
       });
     }
-  }, [currentIndex, playlist, hasInteracted, playNextVideo]);
+  }, [currentIndex, playlist, hasInteracted, advanceToNext]);
 
-  // Fail-Safe Watchers (Duration Timer + Replay Trap + Ended Event)
-  useEffect(() => {
+  // Handler onEnded langsung dari tag video
+  const handleVideoEnded = () => {
+    console.log("[Trigger] Video onEnded dipanggil!");
+    advanceToNext();
+  };
+
+  // Handler timeupdate untuk deteksi replay/akhir video
+  const handleTimeUpdate = () => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
 
-    // 1. Saat metadata terbaca, pasang timer durasi pasti
-    const onLoadedMetadata = () => {
-      const dur = videoEl.duration;
-      if (dur > 0 && isFinite(dur)) {
-        console.log(`[Video Metadata] Durasi terdeteksi: ${dur.toFixed(1)} detik`);
-        clearTimeout(autoNextTimeoutRef.current);
-        // Timer cadangan: jika browser lupa trigger ended, timer ini yang ganti videonya!
-        autoNextTimeoutRef.current = setTimeout(() => {
-          console.log("[Timer Fallback] Durasi video habis. Force next video!");
-          playNextVideo();
-        }, Math.ceil((dur + 0.8) * 1000));
-      }
-    };
+    const cur = videoEl.currentTime;
+    const dur = videoEl.duration;
 
-    // 2. Event ended resmi dari browser
-    const onEnded = () => {
-      console.log("[Event Ended] Video selesai. Next video!");
-      playNextVideo();
-    };
+    if (dur > 0 && isFinite(dur)) {
+      setPlaybackTime(`${Math.floor(cur)}s / ${Math.floor(dur)}s`);
 
-    // 3. Timeupdate watcher untuk menangkap Replay/Looping tidak sengaja
-    const onTimeUpdate = () => {
-      const cur = videoEl.currentTime;
-      const dur = videoEl.duration;
-
-      // Update text waktu di layar
-      if (dur > 0 && isFinite(dur)) {
-        setPlaybackTime(`${Math.floor(cur)}s / ${Math.floor(dur)}s`);
-      } else {
-        setPlaybackTime(`${Math.floor(cur)}s`);
-      }
-
-      // Jebakan Loop: Jika sebelumnya sudah jalan > 3 detik dan tiba-tiba lompat kembali ke < 1.5 detik
-      // Berarti browser mengulang video secara sepihak!
-      if (lastTimeRef.current > 3 && cur < 1.5) {
-        console.log("[Replay Trap] Terdeteksi browser mengulang video sendiri! Paksa lanjut ke video berikutnya.");
-        playNextVideo();
+      // 1. Jika durasi sudah mencapai akhir (sisa < 0.3s)
+      if (cur >= dur - 0.3) {
+        console.log("[Trigger] Waktu mencapai akhir durasi!");
+        advanceToNext();
         return;
       }
+    } else {
+      setPlaybackTime(`${Math.floor(cur)}s`);
+    }
 
-      // Deteksi ujung durasi
-      if (dur > 0 && isFinite(dur) && cur >= dur - 0.4) {
-        console.log("[Near End] Video mendekati akhir. Next video!");
-        playNextVideo();
-        return;
-      }
+    // 2. Jika browser me-restart video (sebelumnya sudah jalan > 4s, tiba-tiba lompat ke < 1s)
+    if (lastTimeRef.current > 4 && cur < 1) {
+      console.log("[Trigger] Browser me-replay sendiri! Paksa lanjut ke video berikutnya.");
+      advanceToNext();
+      return;
+    }
 
-      lastTimeRef.current = cur;
-    };
+    lastTimeRef.current = cur;
+  };
 
-    videoEl.addEventListener('loadedmetadata', onLoadedMetadata);
-    videoEl.addEventListener('ended', onEnded);
-    videoEl.addEventListener('timeupdate', onTimeUpdate);
-
-    return () => {
-      clearTimeout(autoNextTimeoutRef.current);
-      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
-      videoEl.removeEventListener('ended', onEnded);
-      videoEl.removeEventListener('timeupdate', onTimeUpdate);
-    };
-  }, [playNextVideo]);
+  const handleVideoError = (e: any) => {
+    console.error("Video error:", e);
+    setErrorMsg("Video bermasalah, melewati otomatis...");
+    setTimeout(() => {
+      setErrorMsg("");
+      advanceToNext();
+    }, 2000);
+  };
 
   const handleInteract = () => {
     setHasInteracted(true);
@@ -241,18 +185,9 @@ export default function SamsungTVPlayerPage() {
     }
   };
 
-  const handleVideoError = (e: any) => {
-    console.error("Video error terdeteksi:", e);
-    setErrorMsg("Video bermasalah, melewati otomatis...");
-    setTimeout(() => {
-      setErrorMsg("");
-      playNextVideo();
-    }, 2000);
-  };
-
   const currentVideo = playlist[currentIndex];
 
-  // === OVERLAY: Tap to Play (Hanya 1x saat TV dinyalakan pertama kali) ===
+  // === OVERLAY: Tap to Play (Layar Awal) ===
   if (!hasInteracted) {
     return (
       <div
@@ -277,7 +212,7 @@ export default function SamsungTVPlayerPage() {
               </svg>
             </div>
             <p className="text-white text-xl font-semibold mt-2">Tap untuk Mulai Otomatis</p>
-            <p className="text-slate-400 text-sm">{playlist.length} video akan berputar berurutan 1 hingga selesai lalu loop</p>
+            <p className="text-slate-400 text-sm">{playlist.length} video akan berputar berurutan lalu loop</p>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-4">
@@ -293,7 +228,7 @@ export default function SamsungTVPlayerPage() {
         )}
 
         <div className="absolute bottom-6 text-xs text-slate-600 font-mono">
-          Device: KP2KP-TV-01 • Sequential Auto-Loop: Active
+          Device: KP2KP-TV-01 • Sequential Auto-Advance
         </div>
       </div>
     );
@@ -310,6 +245,8 @@ export default function SamsungTVPlayerPage() {
         autoPlay
         playsInline
         muted
+        onEnded={handleVideoEnded}
+        onTimeUpdate={handleTimeUpdate}
         onError={handleVideoError}
         onWaiting={() => setIsLoading(true)}
         onPlaying={() => setIsLoading(false)}
@@ -332,7 +269,7 @@ export default function SamsungTVPlayerPage() {
       {/* Info Urutan & Waktu Video */}
       <div className={`absolute bottom-4 left-4 right-4 flex items-center justify-between transition-opacity duration-300 ${hideCursor ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button
-          onClick={playPrevVideo}
+          onClick={advanceToPrev}
           className="bg-black/60 hover:bg-black/80 text-white px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur"
         >
           ⏮ Sebelumnya
@@ -345,7 +282,7 @@ export default function SamsungTVPlayerPage() {
         </div>
 
         <button
-          onClick={playNextVideo}
+          onClick={advanceToNext}
           className="bg-black/60 hover:bg-black/80 text-white px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur"
         >
           Berikutnya ⏭
