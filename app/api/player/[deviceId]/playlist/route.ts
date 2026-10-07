@@ -1,53 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { googleDriveService } from '@/lib/gdrive';
-
-export const dynamic = 'force-dynamic';
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { deviceId: string } }
-) {
-  const { deviceId } = params;
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'localhost:3000';
-  const proto = req.headers.get('x-forwarded-proto') || 'http';
-  const baseUrl = `${proto}://${host}`;
-
-  try {
-    const player = await db.getPlayerByDeviceId(deviceId);
-    const playlistId = player?.playlist_id || 'p-001';
-
-    let items = await db.getPlaylistItems(playlistId);
-
-    // Auto-sync from Google Drive if empty (first time on Vercel)
-    if (items.length === 0) {
-      try {
-        const driveFiles = await googleDriveService.listVideosInFolder();
-        const synced = [];
-        for (let i = 0; i < driveFiles.length; i++) {
-          const file = driveFiles[i];
-          const v = await db.upsertVideo({
-            name: file.name,
-            google_drive_file_id: file.id,
-            mime_type: file.mimeType,
-            size: file.size,
-            status: 'ACTIVE',
-            sort_order: i + 1
-          });
-          synced.push(v);
-        }
-        if (synced.length > 0) {
-          await db.updatePlaylistOrder(playlistId, synced.map(v => v.id));
-          items = await db.getPlaylistItems(playlistId);
-        }
-      } catch (gErr) {
-        console.warn("Auto-sync from Google Drive failed:", gErr);
-      }
-    }
-
-    const playlists = await db.getPlaylists();
+import const playlists = await db.getPlaylists();
     const currentPlaylist = playlists.find(p => p.id === playlistId);
-
     const formattedItems = items
       .filter(item => item.video && item.video.status === 'ACTIVE')
       .map(item => {
@@ -59,15 +11,13 @@ export async function GET(
           mime_type: v.mime_type,
           size: v.size,
           sort_order: item.sort_order,
-          download_url: `https://drive.usercontent.google.com/download?id=${v.google_drive_file_id}&export=view`
+          download_url: `https://drive.google.com/uc?export=download&id=${v.google_drive_file_id}&confirm=t`
         };
       });
-
     // Version generated from last updated timestamp
     const version = currentPlaylist 
       ? new Date(currentPlaylist.updated_at).getTime()
       : Date.now();
-
     return NextResponse.json({
       success: true,
       device_id: deviceId,
