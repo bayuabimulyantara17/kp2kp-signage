@@ -53,13 +53,25 @@ interface LocalStoreData {
   players: PlayerRecord[];
 }
 
-const storeFilePath = path.join(process.cwd(), 'data', 'store.json');
+const storeFilePath = process.env.VERCEL
+  ? path.join('/tmp', 'store.json')
+  : path.join(process.cwd(), 'data', 'store.json');
+
+declare global {
+  var _signageStore: LocalStoreData | undefined;
+}
 
 function loadStore(): LocalStoreData {
+  if (globalThis._signageStore && globalThis._signageStore.videos.length > 0) {
+    return globalThis._signageStore;
+  }
+
   try {
     if (fs.existsSync(storeFilePath)) {
       const raw = fs.readFileSync(storeFilePath, 'utf8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      globalThis._signageStore = parsed;
+      return parsed;
     }
   } catch (err) {
     console.error("Error loading store.json:", err);
@@ -101,6 +113,7 @@ function loadStore(): LocalStoreData {
 }
 
 function saveStore(data: LocalStoreData) {
+  globalThis._signageStore = data;
   try {
     const dir = path.dirname(storeFilePath);
     if (!fs.existsSync(dir)) {
@@ -108,7 +121,7 @@ function saveStore(data: LocalStoreData) {
     }
     fs.writeFileSync(storeFilePath, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    console.error("Error saving store.json:", err);
+    console.warn("Could not persist to disk, keeping in memory:", err);
   }
 }
 
