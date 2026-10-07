@@ -59,7 +59,7 @@ export async function GET(
           mime_type: v.mime_type,
           size: v.size,
           sort_order: item.sort_order,
-          download_url: `${baseUrl}/api/videos/${v.id}/stream`
+          download_url: `https://drive.usercontent.google.com/download?id=${v.google_drive_file_id}&export=view`
         };
       });
 
