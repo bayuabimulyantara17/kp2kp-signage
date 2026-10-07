@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sssp_config>
+  <app>
+    <app_name>KP2KP Digital Signage</app_name>
+    <version>1.0.0</version>
+    <url>https://kp2kp-signage.vercel.app/tv</url>
+    <resolution>1080x1920</resolution>
+    <orientation>portrait</orientation>
+  </app>
+</sssp_config>
